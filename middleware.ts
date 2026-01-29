@@ -20,6 +20,11 @@ function isAnalyticsPath(path: string) {
 }
 
 function isCustomDomain(host: string) {
+  // ✅ IMPORTANT: Treat the app's own host as NOT a custom domain.
+  // This prevents routes like /dashboard from being rewritten to /view/domains/<host>/...
+  const appHost = process.env.NEXT_PUBLIC_APP_BASE_HOST;
+  if (appHost && host === appHost) return false;
+
   return (
     (process.env.NODE_ENV === "development" &&
       (host?.includes(".local") || host?.includes("papermark.dev"))) ||
