@@ -10,67 +10,63 @@ import IncomingWebhookMiddleware, {
 import PostHogMiddleware from "./lib/middleware/posthog";
 
 function isAnalyticsPath(path: string) {
-  // Create a regular expression
-  // ^ - asserts position at start of the line
-  // /ingest/ - matches the literal string "/ingest/"
-  // .* - matches any character (except for line terminators) 0 or more times
   const pattern = /^\/ingest\/.*/;
-
   return pattern.test(path);
 }
 
+function normalizeHost(host: string) {
+  // remove port if present and lowercase
+  return (host || "").split(":")[0].toLowerCase();
+}
+
 function isCustomDomain(host: string) {
+  const normalizedHost = normalizeHost(host);
+  const appHost = normalizeHost(process.env.NEXT_PUBLIC_APP_BASE_HOST || "");
+
   // ✅ IMPORTANT: Treat the app's own host as NOT a custom domain.
-  // This prevents routes like /dashboard from being rewritten to /view/domains/<host>/...
-  const appHost = process.env.NEXT_PUBLIC_APP_BASE_HOST;
-  if (appHost && host === appHost) return false;
+  if (appHost && normalizedHost === appHost) return false;
 
   return (
     (process.env.NODE_ENV === "development" &&
-      (host?.includes(".local") || host?.includes("papermark.dev"))) ||
+      (normalizedHost.includes(".local") ||
+        normalizedHost.includes("papermark.dev"))) ||
     (process.env.NODE_ENV !== "development" &&
       !(
-        host?.includes("localhost") ||
-        host?.includes("papermark.io") ||
-        host?.includes("papermark.com") ||
-        host?.endsWith(".vercel.app")
+        normalizedHost.includes("localhost") ||
+        normalizedHost.includes("papermark.io") ||
+        normalizedHost.includes("papermark.com") ||
+        normalizedHost.endsWith(".vercel.app")
       ))
   );
 }
 
 export const config = {
   matcher: [
-    /*
-     * Match all paths except for:
-     * 1. /api/ routes
-     * 2. /_next/ (Next.js internals)
-     * 3. /_static (inside /public)
-     * 4. /_vercel (Vercel internals)
-     * 5. /favicon.ico, /sitemap.xml (static files)
-     */
     "/((?!api/|_next/|_static|vendor|_icons|_vercel|favicon.ico|sitemap.xml).*)",
   ],
 };
 
 export default async function middleware(req: NextRequest, ev: NextFetchEvent) {
   const path = req.nextUrl.pathname;
-  const host = req.headers.get("host");
+
+  // ✅ Use Next's parsed hostname (already stripped of port)
+  const hostname = req.nextUrl.hostname; // e.g. do088...simplytools.co
 
   if (isAnalyticsPath(path)) {
     return PostHogMiddleware(req);
   }
 
   // Handle incoming webhooks
-  if (isWebhookPath(host)) {
+  if (isWebhookPath(hostname)) {
     return IncomingWebhookMiddleware(req);
   }
 
   // For custom domains, we need to handle them differently
-  if (isCustomDomain(host || "")) {
+  if (isCustomDomain(hostname)) {
     return DomainMiddleware(req);
   }
 
-  // Handle standard papermark.io paths
+  // Handle standard app paths
   if (
     !path.startsWith("/view/") &&
     !path.startsWith("/verify") &&
